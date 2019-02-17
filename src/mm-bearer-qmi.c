@@ -1908,6 +1908,7 @@ _connect (MMBaseBearer *_self,
             ctx->data_profile_index = 0;
     }
 
+
     ctx->mux_id = get_mux_id (data);
     if (ctx->mux_id) {
         MMKernelDevice *kernel_device;
@@ -1920,6 +1921,7 @@ _connect (MMBaseBearer *_self,
             ctx->data_ep_iface_num = 0;
         }
     }
+
 
     g_object_get (self,
                   MM_BASE_BEARER_CONFIG, &properties,
