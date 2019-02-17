@@ -470,7 +470,6 @@ connect_context_free (ConnectContext *ctx)
     g_free (ctx->user);
     g_free (ctx->password);
 
-
     if (ctx->data)
         mm_port_set_claimed ((MMPort *)ctx->data, FALSE);
 
