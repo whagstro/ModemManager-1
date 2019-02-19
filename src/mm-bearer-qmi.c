@@ -1034,6 +1034,7 @@ get_current_settings (GTask *task, QmiClientWds *client)
     qmi_message_wds_get_current_settings_input_unref (input);
 }
 
+# TODO FIX
 static void
 bind_mux_data_port_ready (QmiClientWds *client,
                           GAsyncResult *res,
@@ -1054,30 +1055,36 @@ bind_mux_data_port_ready (QmiClientWds *client,
     if (output)
         qmi_message_wds_bind_mux_data_port_output_unref (output);
 
+    /* Keep on */
+    ctx->step++;
+    connect_context_step (task);
+}
+
+# TODO: Check bind mux data port ready
 bind_data_port_ready (QmiClientWds *client,
                       GAsyncResult *res,
                       GTask        *task)
 {
-    ConnectContext                             *ctx;
-    GError                                     *error = NULL;
-    g_autoptr(QmiMessageWdsBindDataPortOutput)  output = NULL;
+    ConnectContext *ctx;
+    GError *error = NULL;
+    QmiMessageWdsBindMuxDataPortOutput *output;
 
-    ctx  = g_task_get_task_data (task);
+    ctx = g_task_get_task_data (task);
 
-    g_assert (ctx->running_ipv4 || ctx->running_ipv6);
-    g_assert (!(ctx->running_ipv4 && ctx->running_ipv6));
-
-    output = qmi_client_wds_bind_data_port_finish (client, res, &error);
-    if (!output || !qmi_message_wds_bind_data_port_output_get_result (output, &error)) {
-        g_prefix_error (&error, "Couldn't bind data port: ");
-        complete_connect (task, NULL, error);
-        return;
+    output = qmi_client_wds_bind_mux_data_port_finish (client, res, &error);
+    if (!output || !qmi_message_wds_bind_mux_data_port_output_get_result (output, &error)) {
+        mm_obj_err (ctx->self, "Failed to bind mux data port: %s\n", error->message);
+        g_error_free (error);
     }
+
+    if (output)
+        qmi_message_wds_bind_mux_data_port_output_unref (output);
 
     /* Keep on */
     ctx->step++;
     connect_context_step (task);
 }
+
 
 static void
 set_ip_family_ready (QmiClientWds *client,
@@ -1672,7 +1679,7 @@ connect_context_step (GTask *task)
         ctx->step++;
 
     case CONNECT_STEP_IP_FAMILY_IPV6: {
-        QmiMessageWdsSetIpFamilyInput *input;
+    	QmiMessageWdsSetIpFamilyInput *input;
 
 
         g_assert (ctx->no_ip_family_preference == FALSE);
@@ -1908,7 +1915,6 @@ _connect (MMBaseBearer *_self,
             ctx->data_profile_index = 0;
     }
 
-
     ctx->mux_id = get_mux_id (data);
     if (ctx->mux_id) {
         MMKernelDevice *kernel_device;
@@ -1921,7 +1927,6 @@ _connect (MMBaseBearer *_self,
             ctx->data_ep_iface_num = 0;
         }
     }
-
 
     g_object_get (self,
                   MM_BASE_BEARER_CONFIG, &properties,

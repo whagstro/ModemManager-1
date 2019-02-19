@@ -408,6 +408,37 @@ get_data_format_ready (QmiClientWda *client,
         /* Go on to next step */
         ctx->step++;
 
+    if (output)
+        qmi_message_wda_get_data_format_output_unref (output);
+        
+    port_open_step (task);
+}
+
+static void
+set_data_format_ready (QmiClientWda *client,
+                       GAsyncResult *res,
+                       GTask *task)
+{
+    MMPortQmi *self;
+    PortOpenContext *ctx;
+    QmiMessageWdaSetDataFormatOutput *output;
+    GError *error = NULL;
+    /* TODO: Check protocol in response message ?
+     * QmiWdaDataAggregationProtocol data_aggregation_protocol;
+     */
+
+    self = g_task_get_source_object (task);
+    ctx = g_task_get_task_data (task);
+    output = qmi_client_wda_set_data_format_finish (client, res, &error);
+    if (!output || !qmi_message_wda_set_data_format_output_get_result (output, &error)) {
+        mm_obj_err (self, "Failed to set data format: %s\n", error->message);
+        g_error_free (error);
+    }
+
+    if (output)
+        qmi_message_wda_set_data_format_output_unref (output);
+
+    ctx->step++;
     port_open_step (task);
 }
 
