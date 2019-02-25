@@ -161,6 +161,13 @@ find_device_by_physdev_uid (MMBaseManager *self,
     return g_hash_table_lookup (self->priv->devices, physdev_uid);
 }
 
+static MMDevice *
+find_device_by_kernel_device (MMBaseManager  *manager,
+                              MMKernelDevice *kernel_device)
+{
+    return find_device_by_physdev_uid (manager, mm_kernel_device_get_physdev_uid (kernel_device));
+}
+
 /*****************************************************************************/
 
 typedef struct {
@@ -406,9 +413,9 @@ handle_kernel_event (MMBaseManager            *self,
     if (g_strcmp0 (action, "add") == 0) {
         g_autoptr(MMKernelDevice) kernel_device = NULL;
 #if defined WITH_UDEV
-        if (!mm_context_get_test_no_udev ())
-            kernel_device = mm_kernel_device_udev_new_from_properties (properties, error);
-        else
+    kernel_device = mm_kernel_device_udev_new_from_properties (properties, self->priv->udev, error);
+#else
+    kernel_device = mm_kernel_device_generic_new (properties, error);
 #endif
             kernel_device = mm_kernel_device_generic_new (properties, error);
         if (!kernel_device)
@@ -429,22 +436,37 @@ handle_kernel_event (MMBaseManager            *self,
 #if defined WITH_UDEV
 
 static void
-handle_uevent (MMBaseManager *self,
-               const gchar   *action,
-               GUdevDevice   *device)
+handle_uevent (GUdevClient *client,
+               const gchar *action,
+               GUdevDevice *device,
+               gpointer     user_data)
 {
-    if (g_str_equal (action, "add") || g_str_equal (action, "move") || g_str_equal (action, "change")) {
-        g_autoptr(MMKernelDevice) kernel_device = NULL;
+    MMBaseManager  *self;
+    const gchar    *subsys;
+    const gchar    *name;
+    MMKernelDevice *kernel_device;
 
-        kernel_device = mm_kernel_device_udev_new (device);
+    self = MM_BASE_MANAGER (user_data);
+    g_return_if_fail (action != NULL);
+
+    /* A bit paranoid */
+    subsys = g_udev_device_get_subsystem (device);
+    g_return_if_fail (subsys != NULL);
+    g_return_if_fail (g_str_equal (subsys, "tty") || g_str_equal (subsys, "net") || g_str_has_prefix (subsys, "usb"));
+
+    kernel_device = mm_kernel_device_udev_new (device, client);
+
+    /* We only care about tty/net and usb/cdc-wdm devices when adding modem ports,
+     * but for remove, also handle usb parent device remove events
+     */
+    name = mm_kernel_device_get_name (kernel_device);
+    if (   (g_str_equal (action, "add") || g_str_equal (action, "move") || g_str_equal (action, "change"))
+        && (!g_str_has_prefix (subsys, "usb") || (name && g_str_has_prefix (name, "cdc-wdm"))))
         device_added (self, kernel_device, TRUE, FALSE);
-        return;
-    }
+    else if (g_str_equal (action, "remove"))
+        device_removed (self, kernel_device);
 
-    if (g_str_equal (action, "remove")) {
-        device_removed (self, g_udev_device_get_subsystem (device), g_udev_device_get_name (device));
-        return;
-    }
+    g_object_unref (kernel_device);
 }
 
 typedef struct {

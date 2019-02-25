@@ -54,6 +54,7 @@ struct _MMKernelDeviceUdevPrivate {
 
 /*****************************************************************************/
 
+
 static GUdevDevice*
 get_parent (GUdevDevice *device,
             GUdevClient *client)
@@ -160,20 +161,153 @@ udev_device_get_sysfs_attr_as_hex (GUdevDevice *device,
     return val;
 }
 
-/*****************************************************************************/
-
-static void
-preload_contents_other (MMKernelDeviceUdev *self)
+static GUdevDevice*
+get_parent (GUdevDevice *device,
+            GUdevClient *client)
 {
-    /* For any other kind of bus (or the absence of one, as in virtual devices),
-     * assume this is a single port device and don't try to match multiple ports
-     * together. Also, obviously, no vendor, product, revision or interface. */
-    self->priv->driver = g_strdup (g_udev_device_get_driver (self->priv->device));
+    GUdevDevice *parent;
+    gchar *name, *c;
+
+    parent = g_udev_device_get_parent (device);
+    if (!parent && g_str_equal ( g_udev_device_get_subsystem (device), "net")) {
+        /* Associate VLAN interface with parent interface's parent */
+        name = g_strdup (g_udev_device_get_name (device));
+        if (name && (c = strchr (name, '.'))) {
+            *c = 0;
+            parent = g_udev_client_query_by_subsystem_and_name (client, "net", name);
+            if (parent) {
+                GUdevDevice *tmpdev = parent;
+                parent = g_udev_device_get_parent (tmpdev);
+                g_object_unref (tmpdev);
+            }
+        }
+        g_free(name);
+    }
+
+    return parent;
 }
 
+static gboolean
+get_device_ids (GUdevDevice *device,
+                guint16     *vendor,
+                guint16     *product,
+                guint16     *revision,
+                GUdevClient *client)
+{
+    GUdevDevice *parent = NULL;
+    const gchar *vid = NULL, *pid = NULL, *rid = NULL, *parent_subsys;
+    gboolean success = FALSE;
+    char *pci_vid = NULL, *pci_pid = NULL;
+
+    g_assert (vendor != NULL && product != NULL);
+
+    parent = get_parent (device, client);
+    if (parent) {
+        parent_subsys = g_udev_device_get_subsystem (parent);
+        if (parent_subsys) {
+            if (g_str_equal (parent_subsys, "bluetooth")) {
+                /* Bluetooth devices report the VID/PID of the BT adapter here,
+                 * which isn't really what we want.  Just return null IDs instead.
+                 */
+                success = TRUE;
+                goto out;
+            } else if (g_str_equal (parent_subsys, "pcmcia")) {
+                /* For PCMCIA devices we need to grab the PCMCIA subsystem's
+                 * manfid and cardid, since any IDs on the tty device itself
+                 * may be from PCMCIA controller or something else.
+                 */
+                vid = g_udev_device_get_sysfs_attr (parent, "manf_id");
+                pid = g_udev_device_get_sysfs_attr (parent, "card_id");
+                if (!vid || !pid)
+                    goto out;
+            } else if (g_str_equal (parent_subsys, "platform")) {
+                /* Platform devices don't usually have a VID/PID */
+                success = TRUE;
+                goto out;
+            } else if (g_str_has_prefix (parent_subsys, "usb") &&
+                       (!g_strcmp0 (g_udev_device_get_driver (parent), "qmi_wwan") ||
+                        !g_strcmp0 (g_udev_device_get_driver (parent), "cdc_mbim"))) {
+                /* Need to look for vendor/product in the parent of the QMI/MBIM device */
+                GUdevDevice *qmi_parent;
+
+                qmi_parent = get_parent (parent, client);
+                if (qmi_parent) {
+                    vid = g_udev_device_get_property (qmi_parent, "ID_VENDOR_ID");
+                    pid = g_udev_device_get_property (qmi_parent, "ID_MODEL_ID");
+                    rid = g_udev_device_get_property (qmi_parent, "ID_REVISION");
+                    g_object_unref (qmi_parent);
+                }
+            } else if (g_str_equal (parent_subsys, "pci")) {
+                const char *pci_id;
+
+                /* We can't always rely on the model + vendor showing up on
+                 * the PCI device's child, so look at the PCI parent.  PCI_ID
+                 * has the format "1931:000C".
+                 */
+                pci_id = g_udev_device_get_property (parent, "PCI_ID");
+                if (pci_id && strlen (pci_id) == 9 && pci_id[4] == ':') {
+                    vid = pci_vid = g_strdup (pci_id);
+                    pci_vid[4] = '\0';
+                    pid = pci_pid = g_strdup (pci_id + 5);
+                }
+            }
+        }
+    }
+
+    if (!vid)
+        vid = g_udev_device_get_property (device, "ID_VENDOR_ID");
+    if (!vid)
+        goto out;
+
+    if (strncmp (vid, "0x", 2) == 0)
+        vid += 2;
+    if (strlen (vid) != 4)
+        goto out;
+
+    if (!pid)
+        pid = g_udev_device_get_property (device, "ID_MODEL_ID");
+    if (!pid)
+        goto out;
+
+    if (strncmp (pid, "0x", 2) == 0)
+        pid += 2;
+    if (strlen (pid) != 4)
+        goto out;
+
+    *vendor = (guint16) (mm_utils_hex2byte (vid + 2) & 0xFF);
+    *vendor |= (guint16) ((mm_utils_hex2byte (vid) & 0xFF) << 8);
+
+    *product = (guint16) (mm_utils_hex2byte (pid + 2) & 0xFF);
+    *product |= (guint16) ((mm_utils_hex2byte (pid) & 0xFF) << 8);
+
+
+    /* Revision ID optional, default to 0x0000 if unknown */
+    *revision = 0;
+    if (!rid)
+        rid = g_udev_device_get_property (device, "ID_REVISION");
+    if (rid) {
+        if (strncmp (rid, "0x", 2) == 0)
+            rid += 2;
+        if (strlen (rid) == 4) {
+            *revision = (guint16) (mm_utils_hex2byte (rid + 2) & 0xFF);
+            *revision |= (guint16) ((mm_utils_hex2byte (rid) & 0xFF) << 8);
+        }
+    }
+
+    success = TRUE;
+
+out:
+    if (parent)
+        g_object_unref (parent);
+    g_free (pci_vid);
+    g_free (pci_pid);
+    return success;
+}
+
+
+# TODO check and FIXME
 static void
-preload_contents_platform (MMKernelDeviceUdev *self,
-                           const gchar        *platform)
+ensure_device_ids (MMKernelDeviceUdev *self)
 {
     g_autoptr(GUdevDevice) iter = NULL;
 
@@ -205,6 +339,7 @@ find_physical_gudevdevice (GUdevDevice *child,
     }
 }
 
+# TODO FIXME
 static void
 preload_contents_pcmcia (MMKernelDeviceUdev *self)
 
@@ -265,26 +400,67 @@ preload_contents_pcmcia (MMKernelDeviceUdev *self)
         if (!self->priv->driver)
             self->priv->driver = g_strdup (g_udev_device_get_driver (iter));
 
-        if (g_strcmp0 (g_udev_device_get_subsystem (iter), "pcmcia") == 0)
-            pcmcia_subsystem_found = TRUE;
+    GUdevDevice *iter, *old = NULL;
+    GUdevDevice *physdev = NULL;
+    const char *subsys, *type, *name;
+    guint32 i = 0;
+    gboolean is_usb = FALSE, is_pcmcia = FALSE;
 
-        /* If the parent of this PCMCIA device is no longer part of
-         * the PCMCIA subsystem, we want to stop since we're looking
-         * for the base PCMCIA device, not the PCMCIA controller which
-         * is usually PCI or some other bus type.
-         */
-        parent = g_udev_device_get_parent (iter);
+    g_return_val_if_fail (child != NULL, NULL);
 
-        if (pcmcia_subsystem_found && parent && (g_strcmp0 (g_udev_device_get_subsystem (parent), "pcmcia") != 0)) {
-            self->priv->vendor = udev_device_get_sysfs_attr_as_hex (iter, "manf_id");
-            self->priv->product = udev_device_get_sysfs_attr_as_hex (iter, "card_id");
-            self->priv->physdev = g_object_ref (iter);
-            /* stop traversing as soon as the physical device is found */
-            break;
+    /* Bluetooth rfcomm devices are "virtual" and don't necessarily have
+     * parents at all.
+     */
+    name = g_udev_device_get_name (child);
+    if (name && strncmp (name, "rfcomm", 6) == 0)
+        return g_object_ref (child);
+
+    iter = g_object_ref (child);
+    while (iter && i++ < 8) {
+        subsys = g_udev_device_get_subsystem (iter);
+        if (subsys) {
+            if (is_usb || g_str_has_prefix (subsys, "usb")) {
+                is_usb = TRUE;
+                type = g_udev_device_get_devtype (iter);
+                if (type && !strcmp (type, "usb_device")) {
+                    physdev = iter;
+                    break;
+                }
+            } else if (is_pcmcia || !strcmp (subsys, "pcmcia")) {
+                GUdevDevice *pcmcia_parent;
+                const char *tmp_subsys;
+
+                is_pcmcia = TRUE;
+
+                /* If the parent of this PCMCIA device is no longer part of
+                 * the PCMCIA subsystem, we want to stop since we're looking
+                 * for the base PCMCIA device, not the PCMCIA controller which
+                 * is usually PCI or some other bus type.
+                 */
+                pcmcia_parent = get_parent (iter, client);
+                if (pcmcia_parent) {
+                    tmp_subsys = g_udev_device_get_subsystem (pcmcia_parent);
+                    if (tmp_subsys && strcmp (tmp_subsys, "pcmcia"))
+                        physdev = iter;
+                    g_object_unref (pcmcia_parent);
+                    if (physdev)
+                        break;
+                }
+            } else if (!strcmp (subsys, "platform") ||
+                       !strcmp (subsys, "pci") ||
+                       !strcmp (subsys, "pnp") ||
+                       !strcmp (subsys, "sdio")) {
+                /* Take the first parent as the physical device */
+                physdev = iter;
+                break;
+            }
         }
 
-        g_clear_object (&iter);
-        iter = g_steal_pointer (&parent);
+        old = iter;
+        iter = get_parent (old, client);
+        g_object_unref (old);
+    }
+
     }
 }
 
@@ -300,7 +476,6 @@ ensure_physdev (MMKernelDeviceUdev *self)
 static void
 preload_contents_pci (MMKernelDeviceUdev *self)
 {
-    g_autoptr(GUdevDevice) iter = NULL;
 
     iter = g_object_ref (self->priv->device);
     while (iter) {
@@ -467,6 +642,7 @@ kernel_device_get_name (MMKernelDevice *_self)
     return mm_kernel_event_properties_get_name (self->priv->properties);
 }
 
+# TODO checkme
 static const gchar *
 kernel_device_get_driver (MMKernelDevice *self)
 {
@@ -498,6 +674,9 @@ kernel_device_get_driver (MMKernelDevice *self)
             if (subsys && !strcmp (subsys, "bluetooth"))
                 driver = "bluetooth";
         }
+
+        if (parent)
+            g_object_unref (parent);
     }
 
     /* Newer kernels don't set up the rfcomm port parent in sysfs,
@@ -507,6 +686,7 @@ kernel_device_get_driver (MMKernelDevice *self)
     if (!driver && strncmp (name, "rfcomm", 6) == 0)
         driver = "bluetooth";
 
+      # TODO
     /* Cache driver if found */
     if (driver)
         self->priv->driver = g_strdup (driver);
@@ -516,6 +696,7 @@ kernel_device_get_driver (MMKernelDevice *self)
 
     /* Note: may return NULL! */
     return self->priv->driver;
+
 }
 
 static const gchar *
