@@ -772,6 +772,10 @@ mm_bearer_properties_cmp (MMBearerProperties         *a,
     }
     if (a->priv->rm_protocol != b->priv->rm_protocol)
         return FALSE;
+
+   if (!cmp_str (a->priv->number, b->priv->number))
+   	    return FALSE;
+   
     return TRUE;
 }
 
