@@ -381,6 +381,9 @@ gps_startup_ready (MMBaseModem  *self,
 {
     MMModemLocationSource  source;
     GError                *error = NULL;
+    Private               *priv;
+
+    priv = get_private (MM_SHARED_QUECTEL (self));
 
     mm_base_modem_at_sequence_finish (self, res, NULL, &error);
     if (error) {
@@ -404,10 +407,16 @@ gps_startup_ready (MMBaseModem  *self,
                                          MM_CORE_ERROR,
                                          MM_CORE_ERROR_FAILED,
                                          "Couldn't open raw GPS serial port");
-        } else
+        } else {
+            /* GPS port was successfully opened */
+            priv->enabled_sources |= source;
             g_task_return_boolean (task, TRUE);
-    } else
+        }
+    } else {
+        /* No need to open GPS port */
+        priv->enabled_sources |= source;
         g_task_return_boolean (task, TRUE);
+    }
     g_object_unref (task);
 }
 
@@ -463,8 +472,6 @@ mm_shared_quectel_enable_location_gathering (MMIfaceModemLocation  *self,
                                             MM_MODEM_LOCATION_SOURCE_GPS_RAW |
                                             MM_MODEM_LOCATION_SOURCE_GPS_UNMANAGED)));
 
-    priv->enabled_sources |= source;
-
     if (start_gps) {
         mm_base_modem_at_sequence (
             MM_BASE_MODEM (self),
@@ -477,6 +484,7 @@ mm_shared_quectel_enable_location_gathering (MMIfaceModemLocation  *self,
     }
 
     /* If the GPS is already running just return */
+    priv->enabled_sources |= source;
     g_task_return_boolean (task, TRUE);
     g_object_unref (task);
 }
