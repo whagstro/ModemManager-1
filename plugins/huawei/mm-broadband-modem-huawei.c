@@ -4116,14 +4116,15 @@ enable_location_gathering_finish (MMIfaceModemLocation  *self,
 }
 
 static void
-gps_startup_ready (MMBaseModem  *self,
+gps_startup_ready (MMBaseModem  *_self,
                    GAsyncResult *res,
                    GTask        *task)
 {
-    MMModemLocationSource  source;
-    GError                *error = NULL;
+    MMBroadbandModemHuawei *self = MM_BROADBAND_MODEM_HUAWEI (_self);
+    MMModemLocationSource   source;
+    GError                 *error = NULL;
 
-    mm_base_modem_at_sequence_finish (self, res, NULL, &error);
+    mm_base_modem_at_sequence_finish (_self, res, NULL, &error);
     if (error) {
         g_task_return_error (task, error);
         g_object_unref (task);
@@ -4145,10 +4146,16 @@ gps_startup_ready (MMBaseModem  *self,
                                          MM_CORE_ERROR,
                                          MM_CORE_ERROR_FAILED,
                                          "Couldn't open raw GPS serial port");
-        } else
+        } else {
+            /* GPS port was successfully opened */
+            self->priv->enabled_sources |= source;
             g_task_return_boolean (task, TRUE);
-    } else
+        }
+    } else {
+        /* No need to open GPS port */
+        self->priv->enabled_sources |= source;
         g_task_return_boolean (task, TRUE);
+    }
 
     g_object_unref (task);
 }
@@ -4181,8 +4188,6 @@ parent_enable_location_gathering_ready (MMIfaceModemLocation *_self,
                                                   MM_MODEM_LOCATION_SOURCE_GPS_RAW |
                                                   MM_MODEM_LOCATION_SOURCE_GPS_UNMANAGED)));
 
-    self->priv->enabled_sources |= source;
-
     if (start_gps) {
         mm_base_modem_at_sequence (
             MM_BASE_MODEM (self),
@@ -4195,6 +4200,7 @@ parent_enable_location_gathering_ready (MMIfaceModemLocation *_self,
     }
 
     /* For any other location (e.g. 3GPP), or if GPS already running just return */
+    self->priv->enabled_sources |= source;
     g_task_return_boolean (task, TRUE);
     g_object_unref (task);
 }
