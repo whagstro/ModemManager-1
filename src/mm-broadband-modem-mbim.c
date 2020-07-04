@@ -4360,6 +4360,7 @@ signal_load_values_result_free (SignalLoadValuesResult *result)
     g_clear_object (&result->gsm);
     g_clear_object (&result->umts);
     g_clear_object (&result->lte);
+    g_clear_object (&result->nr5g);
     g_slice_free (SignalLoadValuesResult, result);
 }
 
@@ -4395,6 +4396,11 @@ modem_signal_load_values_finish (MMIfaceModemSignal  *self,
         result->lte = NULL;
     }
 
+    if (nr5g && result->nr5g) {
+        *nr5g = result->nr5g;
+        result->nr5g = NULL;
+    }
+
     signal_load_values_result_free (result);
 
     /* No 3GPP2 support */
@@ -4402,8 +4408,6 @@ modem_signal_load_values_finish (MMIfaceModemSignal  *self,
         *cdma = NULL;
     if (evdo)
         *evdo = NULL;
-    if (nr5g)
-        *nr5g = NULL;
     return TRUE;
 }
 
