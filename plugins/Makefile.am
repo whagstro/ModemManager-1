@@ -1167,8 +1167,6 @@ endif
 
 if ENABLE_PLUGIN_QUECTEL
 
-dist_udevrules_DATA += quectel/77-mm-quectel-port-types.rules
-
 pkglib_LTLIBRARIES += libmm-plugin-quectel.la
 libmm_plugin_quectel_la_SOURCES = \
 	quectel/mm-plugin-quectel.c \
@@ -1189,6 +1187,9 @@ libmm_plugin_quectel_la_CPPFLAGS = \
 	-DMM_MODULE_NAME=\"quectel\" \
 	$(NULL)
 libmm_plugin_quectel_la_LDFLAGS = $(PLUGIN_COMMON_LINKER_FLAGS)
+
+dist_udevrules_DATA += quectel/77-mm-quectel-port-types.rules
+AM_CFLAGS += -DTESTUDEVRULESDIR_QUECTEL=\"${srcdir}/quectel\"
 
 endif
 
