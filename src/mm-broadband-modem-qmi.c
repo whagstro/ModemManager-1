@@ -1589,7 +1589,7 @@ get_signal_info_ready (QmiClientNas *client,
     qmi_message_nas_get_signal_info_output_unref (output);
 }
 
-#endif /* WITH_NEWEST_QMI_COMMANDS */
+#else /* WITH_NEWEST_QMI_COMMANDS */
 
 static gboolean
 signal_strength_get_quality_and_access_tech (MMBroadbandModemQmi *self,
@@ -1697,6 +1697,8 @@ get_signal_strength_ready (QmiClientNas *client,
 
     qmi_message_nas_get_signal_strength_output_unref (output);
 }
+
+#endif /* WITH_NEWEST_QMI_COMMANDS */
 
 static void
 load_signal_quality (MMIfaceModem *self,
@@ -2586,6 +2588,8 @@ modem_3gpp_run_registration_checks_finish (MMIfaceModem3gpp *self,
     return g_task_propagate_boolean (G_TASK (res), error);
 }
 
+#if !defined WITH_NEWEST_QMI_COMMANDS
+
 static void
 common_process_serving_system_3gpp (MMBroadbandModemQmi *self,
                                     QmiMessageNasGetServingSystemOutput *response_output,
@@ -2844,7 +2848,7 @@ get_serving_system_3gpp_ready (QmiClientNas *client,
     qmi_message_nas_get_serving_system_output_unref (output);
 }
 
-#if defined WITH_NEWEST_QMI_COMMANDS
+#else /* WITH_NEWEST_QMI_COMMANDS */
 
 static gboolean
 process_common_info (QmiNasServiceStatus service_status,
@@ -3466,6 +3470,8 @@ ri_serving_system_or_system_info_ready (QmiClientNas *client,
     g_object_unref (task);
 }
 
+#if !defined WITH_NEWEST_QMI_COMMANDS
+
 static void
 common_enable_disable_unsolicited_registration_events_serving_system (GTask *task)
 {
@@ -3484,7 +3490,8 @@ common_enable_disable_unsolicited_registration_events_serving_system (GTask *tas
         task);
 }
 
-#if defined WITH_NEWEST_QMI_COMMANDS
+#else /* WITH_NEWEST_QMI_COMMANDS */
+
 static void
 common_enable_disable_unsolicited_registration_events_system_info (GTask *task)
 {
@@ -3502,6 +3509,7 @@ common_enable_disable_unsolicited_registration_events_system_info (GTask *task)
         (GAsyncReadyCallback)ri_serving_system_or_system_info_ready,
         task);
 }
+
 #endif /* WITH_NEWEST_QMI_COMMANDS */
 
 static void
@@ -4524,7 +4532,8 @@ system_info_indication_cb (QmiClientNas *client,
     if (mm_iface_modem_is_3gpp (MM_IFACE_MODEM (self)))
         common_process_system_info_3gpp (self, NULL, output);
 }
-#endif
+
+#else /* WITH_NEWEST_QMI_COMMANDS */
 
 static void
 serving_system_indication_cb (QmiClientNas *client,
@@ -4536,6 +4545,8 @@ serving_system_indication_cb (QmiClientNas *client,
     else if (mm_iface_modem_is_cdma (MM_IFACE_MODEM (self)))
         common_process_serving_system_cdma (self, NULL, output);
 }
+
+#endif
 
 static void
 common_setup_cleanup_unsolicited_registration_events (MMBroadbandModemQmi *self,
@@ -4716,6 +4727,8 @@ common_enable_disable_unsolicited_events_finish (MMBroadbandModemQmi  *self,
     return g_task_propagate_boolean (G_TASK (res), error);
 }
 
+#if !defined WITH_NEWEST_QMI_COMMANDS
+
 static void
 ser_signal_strength_ready (QmiClientNas *client,
                            GAsyncResult *res,
@@ -4773,7 +4786,7 @@ common_enable_disable_unsolicited_events_signal_strength (GTask *task)
         task);
 }
 
-#if defined WITH_NEWEST_QMI_COMMANDS
+#else /* WITH_NEWEST_QMI_COMMANDS */
 
 static void
 ri_signal_info_ready (QmiClientNas *client,
