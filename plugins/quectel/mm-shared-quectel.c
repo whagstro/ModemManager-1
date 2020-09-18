@@ -43,6 +43,7 @@ typedef enum {
 } FeatureSupport;
 
 typedef struct {
+    MMIfaceModem          *iface_modem_parent;
     MMIfaceModemLocation  *iface_modem_location_parent;
     MMModemLocationSource  provided_sources;
     MMModemLocationSource  enabled_sources;
@@ -65,8 +66,11 @@ get_private (MMSharedQuectel *self)
         priv->enabled_sources   = MM_MODEM_LOCATION_SOURCE_NONE;
         priv->qgps_supported    = FEATURE_SUPPORT_UNKNOWN;
 
-        g_assert (MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_location_interface);
-        priv->iface_modem_location_parent = MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_location_interface (self);
+        g_assert (MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_modem_location_interface);
+        priv->iface_modem_location_parent = MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_modem_location_interface (self);
+
+        g_assert (MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_modem_interface);
+        priv->iface_modem_parent = MM_SHARED_QUECTEL_GET_INTERFACE (self)->peek_parent_modem_interface (self);
 
         g_object_set_qdata (G_OBJECT (self), private_quark, priv);
     }
@@ -183,15 +187,36 @@ mm_shared_quectel_setup_sim_hot_swap_finish (MMIfaceModem  *self,
     return g_task_propagate_boolean (G_TASK (res), error);
 }
 
+static void
+parent_setup_sim_hot_swap_ready (MMIfaceModem *self,
+                                 GAsyncResult *res,
+                                 GTask        *task)
+{
+    Private           *priv;
+    g_autoptr(GError)  error = NULL;
+
+    priv = get_private (MM_SHARED_QUECTEL (self));
+
+    if (!priv->iface_modem_parent->setup_sim_hot_swap_finish (self, res, &error))
+        mm_obj_dbg (self, "additional SIM hot swap detection setup failed: %s", error->message);
+
+    /* The +QUSIM based setup never fails, so we can safely return success here */
+    g_task_return_boolean (task, TRUE);
+    g_object_unref (task);
+}
+
 void
 mm_shared_quectel_setup_sim_hot_swap (MMIfaceModem        *self,
                                       GAsyncReadyCallback  callback,
                                       gpointer             user_data)
 {
+    Private        *priv;
     MMPortSerialAt *ports[2];
     GTask          *task;
     GRegex         *pattern;
     guint           i;
+
+    priv = get_private (MM_SHARED_QUECTEL (self));
 
     task = g_task_new (self, NULL, callback, user_data);
 
@@ -247,7 +272,6 @@ mm_shared_quectel_setup_sim_hot_swap (MMIfaceModem        *self,
     }
 
     /* Otherwise, we're done */
-
     g_task_return_boolean (task, TRUE);
     g_object_unref (task);
 }
