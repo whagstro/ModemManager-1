@@ -45,9 +45,10 @@ struct _MMKernelDeviceUdevClass {
     MMKernelDeviceClass parent;
 };
 
-GType           mm_kernel_device_udev_get_type            (void);
-MMKernelDevice *mm_kernel_device_udev_new                 (GUdevDevice              *udev_device,
-                                                           GUdevClient              *client);
+GType mm_kernel_device_udev_get_type (void);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (MMKernelDeviceUdev, g_object_unref)
+
+MMKernelDevice *mm_kernel_device_udev_new                 (GUdevDevice              *udev_device);
 MMKernelDevice *mm_kernel_device_udev_new_from_properties (MMKernelEventProperties  *properties,
                                                            GUdevClient              *client,
                                                            GError                  **error);
