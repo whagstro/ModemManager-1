@@ -221,8 +221,6 @@ find_physical_gudevdevice (GUdevDevice *child,
     guint32 i = 0;
     gboolean is_usb = FALSE, is_pcmcia = FALSE;
 
-    g_return_val_if_fail (child != NULL, NULL);
-
     /* Bluetooth rfcomm devices are "virtual" and don't necessarily have
      * parents at all.
      */
@@ -336,8 +334,6 @@ kernel_device_get_subsystem (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     if (self->priv->device)
@@ -351,8 +347,6 @@ static const gchar *
 kernel_device_get_name (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -369,8 +363,6 @@ kernel_device_get_driver (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
     const gchar *driver, *subsys, *name;
     GUdevDevice *parent = NULL;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -416,11 +408,13 @@ kernel_device_get_driver (MMKernelDevice *_self)
 }
 
 static const gchar *
-kernel_device_get_sysfs_path (MMKernelDevice *self)
+kernel_device_get_sysfs_path (MMKernelDevice *_self)
 {
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE (self), NULL);
+    MMKernelDeviceUdev *self;
 
-    if (!MM_KERNEL_DEVICE_UDEV (self)->priv->device)
+    self = MM_KERNEL_DEVICE_UDEV (_self);
+
+    if (!self->priv->device)
         return NULL;
 
     return g_udev_device_get_sysfs_path (MM_KERNEL_DEVICE_UDEV (self)->priv->device);
@@ -431,8 +425,6 @@ kernel_device_get_physdev_uid (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
     const gchar *uid = NULL;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -460,8 +452,6 @@ kernel_device_get_physdev_vid (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), 0);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_device_ids (self);
     return self->priv->vendor;
@@ -471,8 +461,6 @@ static guint16
 kernel_device_get_physdev_pid (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), 0);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_device_ids (self);
@@ -484,8 +472,6 @@ kernel_device_get_physdev_revision (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), 0);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_device_ids (self);
     return self->priv->revision;
@@ -495,8 +481,6 @@ static const gchar *
 kernel_device_get_physdev_sysfs_path (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_physdev (self);
@@ -511,8 +495,6 @@ kernel_device_get_physdev_subsystem (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_physdev (self);
     if (!self->priv->physdev)
@@ -525,8 +507,6 @@ static const gchar *
 kernel_device_get_physdev_manufacturer (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_physdev (self);
@@ -541,8 +521,6 @@ kernel_device_get_physdev_product (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_physdev (self);
     if (!self->priv->physdev)
@@ -556,8 +534,6 @@ kernel_device_get_interface_class (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), -1);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_interface (self);
     return (self->priv->interface ? g_udev_device_get_sysfs_attr_as_int (self->priv->interface, "bInterfaceClass") : -1);
@@ -567,8 +543,6 @@ static gint
 kernel_device_get_interface_subclass (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), -1);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_interface (self);
@@ -580,8 +554,6 @@ kernel_device_get_interface_protocol (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), -1);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_interface (self);
     return (self->priv->interface ? g_udev_device_get_sysfs_attr_as_int (self->priv->interface, "bInterfaceProtocol") : -1);
@@ -592,8 +564,6 @@ kernel_device_get_interface_sysfs_path (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_interface (self);
     return (self->priv->interface ? g_udev_device_get_sysfs_path (self->priv->interface) : NULL);
@@ -603,8 +573,6 @@ static const gchar *
 kernel_device_get_interface_description (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
     ensure_interface (self);
@@ -617,9 +585,6 @@ kernel_device_cmp (MMKernelDevice *_a,
 {
     MMKernelDeviceUdev *a;
     MMKernelDeviceUdev *b;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_a), FALSE);
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_b), FALSE);
 
     a = MM_KERNEL_DEVICE_UDEV (_a);
     b = MM_KERNEL_DEVICE_UDEV (_b);
@@ -648,8 +613,6 @@ kernel_device_has_property (MMKernelDevice *_self,
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), FALSE);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     if (!self->priv->device)
@@ -663,8 +626,6 @@ kernel_device_get_property (MMKernelDevice *_self,
                             const gchar    *property)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -680,8 +641,6 @@ kernel_device_get_property_as_boolean (MMKernelDevice *_self,
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), FALSE);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     if (!self->priv->device)
@@ -695,8 +654,6 @@ kernel_device_get_property_as_int (MMKernelDevice *_self,
                                    const gchar    *property)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), -1);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -714,8 +671,6 @@ kernel_device_get_property_as_int_hex (MMKernelDevice *_self,
     const gchar        *s;
     guint               out = 0;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), G_MAXUINT);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     if (!self->priv->device)
@@ -730,8 +685,6 @@ kernel_device_has_global_property (MMKernelDevice *_self,
                                    const gchar    *property)
 {
     MMKernelDeviceUdev *self;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), FALSE);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -748,8 +701,6 @@ kernel_device_get_global_property (MMKernelDevice *_self,
 {
     MMKernelDeviceUdev *self;
     const gchar        *str;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -768,8 +719,6 @@ kernel_device_get_global_property_as_boolean (MMKernelDevice *_self,
 {
     MMKernelDeviceUdev *self;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), FALSE);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     ensure_physdev (self);
@@ -787,8 +736,6 @@ kernel_device_get_global_property_as_int (MMKernelDevice *_self,
 {
     MMKernelDeviceUdev *self;
     gint                value;
-
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), -1);
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -809,8 +756,6 @@ kernel_device_get_global_property_as_int_hex (MMKernelDevice *_self,
     const gchar        *s;
     guint               out = 0;
 
-    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), G_MAXUINT);
-
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     ensure_physdev (self);
@@ -828,10 +773,9 @@ MMKernelDevice *
 mm_kernel_device_udev_new (GUdevDevice *udev_device,
                            GUdevClient *client)
 {
-    GError *error = NULL;
+    GError         *error = NULL;
     MMKernelDevice *self;
 
-    g_return_val_if_fail (G_UDEV_IS_DEVICE (udev_device), NULL);
 
     self = MM_KERNEL_DEVICE (g_initable_new (MM_TYPE_KERNEL_DEVICE_UDEV,
                                              NULL,
@@ -920,8 +864,8 @@ initable_init (GInitable     *initable,
                GError       **error)
 {
     MMKernelDeviceUdev *self = MM_KERNEL_DEVICE_UDEV (initable);
-    const gchar *subsystem;
-    const gchar *name;
+    const gchar        *subsystem;
+    const gchar        *name;
 
     /* When created from a GUdevDevice, we're done */
     if (self->priv->device)
