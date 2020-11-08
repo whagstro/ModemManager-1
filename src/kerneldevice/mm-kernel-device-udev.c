@@ -11,6 +11,7 @@
  * GNU General Public License for more details:
  *
  * Copyright (C) 2016 Velocloud, Inc.
+ * Copyright (C) 2020 Aleksander Morgado <aleksander@aleksander.es>
  */
 
 #include <string.h>
@@ -39,6 +40,7 @@ static GParamSpec *properties[PROP_LAST];
 
 struct _MMKernelDeviceUdevPrivate {
     GUdevDevice *device;
+
     GUdevDevice *interface;
     GUdevDevice *physdev;
     GUdevClient *client;
@@ -145,88 +147,74 @@ get_device_ids (GUdevDevice *device,
         }
     }
 
-    if (!vid)
-        vid = g_udev_device_get_property (device, "ID_VENDOR_ID");
-    if (!vid)
-        goto out;
+static guint
+udev_device_get_sysfs_attr_as_hex (GUdevDevice *device,
+                                   const gchar *attribute)
+{
+    const gchar *attr;
+    guint        val = 0;
 
-    if (strncmp (vid, "0x", 2) == 0)
-        vid += 2;
-    if (strlen (vid) != 4)
-        goto out;
+    attr = g_udev_device_get_sysfs_attr (device, attribute);
+    if (attr)
+        mm_get_uint_from_hex_str (attr, &val);
+    return val;
+}
 
-    if (!pid)
-        pid = g_udev_device_get_property (device, "ID_MODEL_ID");
-    if (!pid)
-        goto out;
+/*****************************************************************************/
 
-    if (strncmp (pid, "0x", 2) == 0)
-        pid += 2;
-    if (strlen (pid) != 4)
-        goto out;
-
-    *vendor = (guint16) (mm_utils_hex2byte (vid + 2) & 0xFF);
-    *vendor |= (guint16) ((mm_utils_hex2byte (vid) & 0xFF) << 8);
-
-    *product = (guint16) (mm_utils_hex2byte (pid + 2) & 0xFF);
-    *product |= (guint16) ((mm_utils_hex2byte (pid) & 0xFF) << 8);
-
-
-    /* Revision ID optional, default to 0x0000 if unknown */
-    *revision = 0;
-    if (!rid)
-        rid = g_udev_device_get_property (device, "ID_REVISION");
-    if (rid) {
-        if (strncmp (rid, "0x", 2) == 0)
-            rid += 2;
-        if (strlen (rid) == 4) {
-            *revision = (guint16) (mm_utils_hex2byte (rid + 2) & 0xFF);
-            *revision |= (guint16) ((mm_utils_hex2byte (rid) & 0xFF) << 8);
-        }
-    }
-
-    success = TRUE;
-
-out:
-    if (parent)
-        g_object_unref (parent);
-    g_free (pci_vid);
-    g_free (pci_pid);
-    return success;
+static void
+preload_contents_other (MMKernelDeviceUdev *self)
+{
+    /* For any other kind of bus (or the absence of one, as in virtual devices),
+     * assume this is a single port device and don't try to match multiple ports
+     * together. Also, obviously, no vendor, product, revision or interface. */
+    self->priv->driver = g_strdup (g_udev_device_get_driver (self->priv->device));
 }
 
 static void
-ensure_device_ids (MMKernelDeviceUdev *self)
+preload_contents_platform (MMKernelDeviceUdev *self,
+                           const gchar        *platform)
 {
-    /* Revision is optional */
-    if (self->priv->vendor || self->priv->product)
-        return;
+    g_autoptr(GUdevDevice) iter = NULL;
 
-    if (!self->priv->device)
-        return;
+    iter = g_object_ref (self->priv->device);
+    while (iter) {
+        GUdevDevice *parent;
 
     if (!get_device_ids (self->priv->device, &self->priv->vendor, &self->priv->product, &self->priv->revision, self->priv->client))
         mm_obj_dbg (self, "could not get vendor/product id");
 }
 
-/*****************************************************************************/
+        /* Store the first driver found */
+        if (!self->priv->driver)
+            self->priv->driver = g_strdup (g_udev_device_get_driver (iter));
+
+        /* Take first parent with the given platform subsystem as physical device */
+        if (!self->priv->physdev && (g_strcmp0 (g_udev_device_get_subsystem (iter), platform) == 0)) {
+            self->priv->physdev = g_object_ref (iter);
+            /* stop traversing as soon as the physical device is found */
+            break;
+        }
 
 static GUdevDevice *
 find_physical_gudevdevice (GUdevDevice *child,
                            GUdevClient *client)
-{
-    GUdevDevice *iter, *old = NULL;
-    GUdevDevice *physdev = NULL;
-    const char *subsys, *type, *name;
-    guint32 i = 0;
-    gboolean is_usb = FALSE, is_pcmcia = FALSE;
+        parent = g_udev_device_get_parent (iter);
+        g_clear_object (&iter);
+        iter = parent;
+    }
+}
 
-    /* Bluetooth rfcomm devices are "virtual" and don't necessarily have
-     * parents at all.
-     */
-    name = g_udev_device_get_name (child);
-    if (name && strncmp (name, "rfcomm", 6) == 0)
-        return g_object_ref (child);
+static void
+preload_contents_pcmcia (MMKernelDeviceUdev *self)
+
+{
+    g_autoptr(GUdevDevice) iter = NULL;
+    gboolean               pcmcia_subsystem_found = FALSE;
+
+    iter = g_object_ref (self->priv->device);
+    while (iter) {
+        g_autoptr(GUdevDevice) parent = NULL;
 
     iter = g_object_ref (child);
     while (iter && i++ < 8) {
@@ -272,9 +260,32 @@ find_physical_gudevdevice (GUdevDevice *child,
         old = iter;
         iter = get_parent (old, client);
         g_object_unref (old);
-    }
 
-    return physdev;
+        /* Store the first driver found */
+        if (!self->priv->driver)
+            self->priv->driver = g_strdup (g_udev_device_get_driver (iter));
+
+        if (g_strcmp0 (g_udev_device_get_subsystem (iter), "pcmcia") == 0)
+            pcmcia_subsystem_found = TRUE;
+
+        /* If the parent of this PCMCIA device is no longer part of
+         * the PCMCIA subsystem, we want to stop since we're looking
+         * for the base PCMCIA device, not the PCMCIA controller which
+         * is usually PCI or some other bus type.
+         */
+        parent = g_udev_device_get_parent (iter);
+
+        if (pcmcia_subsystem_found && parent && (g_strcmp0 (g_udev_device_get_subsystem (parent), "pcmcia") != 0)) {
+            self->priv->vendor = udev_device_get_sysfs_attr_as_hex (iter, "manf_id");
+            self->priv->product = udev_device_get_sysfs_attr_as_hex (iter, "card_id");
+            self->priv->physdev = g_object_ref (iter);
+            /* stop traversing as soon as the physical device is found */
+            break;
+        }
+
+        g_clear_object (&iter);
+        iter = g_steal_pointer (&parent);
+    }
 }
 
 static void
@@ -286,21 +297,47 @@ ensure_physdev (MMKernelDeviceUdev *self)
         self->priv->physdev = find_physical_gudevdevice (self->priv->device, self->priv->client);
 }
 
-/*****************************************************************************/
+static void
+preload_contents_pci (MMKernelDeviceUdev *self)
+{
+    g_autoptr(GUdevDevice) iter = NULL;
+
+    iter = g_object_ref (self->priv->device);
+    while (iter) {
+        GUdevDevice *parent;
+
+        /* Store the first driver found */
+        if (!self->priv->driver)
+            self->priv->driver = g_strdup (g_udev_device_get_driver (iter));
+
+        /* the PCI channel specific devices have their own drivers and
+         * subsystems, we can rely on the physical device being the first
+         * one that reports the 'pci' subsystem */
+        if (!self->priv->physdev && (g_strcmp0 (g_udev_device_get_subsystem (iter), "pci") == 0)) {
+            self->priv->vendor = udev_device_get_sysfs_attr_as_hex (iter, "vendor");
+            self->priv->product = udev_device_get_sysfs_attr_as_hex (iter, "device");
+            self->priv->revision = udev_device_get_sysfs_attr_as_hex (iter, "revision");
+            self->priv->physdev = g_object_ref (iter);
+            /* stop traversing as soon as the physical device is found */
+            break;
+        }
+
+        parent = g_udev_device_get_parent (iter);
+        g_clear_object (&iter);
+        iter = parent;
+    }
+}
 
 static void
-ensure_interface (MMKernelDeviceUdev *self)
+preload_contents_usb (MMKernelDeviceUdev *self)
 {
-    GUdevDevice *new_parent;
-    GUdevDevice *parent;
+    g_autoptr(GUdevDevice) iter = NULL;
 
-    if (self->priv->interface)
-        return;
+    iter = g_object_ref (self->priv->device);
+    while (iter) {
+        GUdevDevice *parent;
+        const gchar *devtype;
 
-    if (!self->priv->device)
-        return;
-
-    ensure_physdev (self);
 
     parent = get_parent (self->priv->device, self->priv->client);
     while (1) {
@@ -308,23 +345,96 @@ ensure_interface (MMKernelDeviceUdev *self)
         if (!parent)
             break;
 
-        /* Look for the first parent that is a USB interface (i.e. has
-         * bInterfaceClass) */
-        if (g_udev_device_has_sysfs_attr (parent, "bInterfaceClass")) {
-            self->priv->interface = parent;
+        devtype = g_udev_device_get_devtype (iter);
+
+        /* is this the USB interface? */
+        if (!self->priv->interface && (g_strcmp0 (devtype, "usb_interface") == 0)) {
+            self->priv->interface = g_object_ref (iter);
+            self->priv->driver = g_strdup (g_udev_device_get_driver (iter));
+        }
+
+        /* is this the USB physdev? */
+        if (!self->priv->physdev && (g_strcmp0 (devtype, "usb_device") == 0)) {
+            self->priv->vendor = udev_device_get_sysfs_attr_as_hex (iter, "idVendor");
+            self->priv->product = udev_device_get_sysfs_attr_as_hex (iter, "idProduct");
+            self->priv->revision = udev_device_get_sysfs_attr_as_hex (iter, "bcdDevice");
+            self->priv->physdev = g_object_ref (iter);
+            /* stop traversing as soon as the physical device is found */
             break;
         }
 
-        /* If unknown physdev, just stop right away */
-        if (!self->priv->physdev || parent == self->priv->physdev) {
-            g_object_unref (parent);
-            break;
-        }
-
-        new_parent = g_udev_device_get_parent (parent);
-        g_object_unref (parent);
-        parent = new_parent;
+        parent = g_udev_device_get_parent (iter);
+        g_clear_object (&iter);
+        iter = parent;
     }
+}
+
+static gchar *
+find_device_bus_subsystem (MMKernelDeviceUdev *self)
+{
+    g_autoptr(GUdevDevice) iter = NULL;
+
+    iter = g_object_ref (self->priv->device);
+    while (iter) {
+        const gchar *subsys;
+        GUdevDevice *parent;
+
+        /* stop search as soon as we find a parent object
+         * of one of the supported bus subsystems */
+        subsys = g_udev_device_get_subsystem (iter);
+        if ((g_strcmp0 (subsys, "usb") == 0)      ||
+            (g_strcmp0 (subsys, "pcmcia") == 0)   ||
+            (g_strcmp0 (subsys, "pci") == 0)      ||
+            (g_strcmp0 (subsys, "platform") == 0) ||
+            (g_strcmp0 (subsys, "pnp") == 0)      ||
+            (g_strcmp0 (subsys, "sdio") == 0))
+            return g_strdup (subsys);
+
+        parent = g_udev_device_get_parent (iter);
+        g_clear_object (&iter);
+        iter = parent;
+    }
+
+    /* no more parents to check */
+    return NULL;
+}
+
+static void
+preload_contents (MMKernelDeviceUdev *self)
+{
+    g_autofree gchar *bus_subsys = NULL;
+
+    bus_subsys = find_device_bus_subsystem (self);
+    if (g_strcmp0 (bus_subsys, "usb") == 0)
+        preload_contents_usb (self);
+    else if (g_strcmp0 (bus_subsys, "pcmcia") == 0)
+        preload_contents_pcmcia (self);
+    else if (g_strcmp0 (bus_subsys, "pci") == 0)
+        preload_contents_pci (self);
+    else if ((g_strcmp0 (bus_subsys, "platform") == 0) ||
+             (g_strcmp0 (bus_subsys, "pnp") == 0)      ||
+             (g_strcmp0 (bus_subsys, "sdio") == 0))
+        preload_contents_platform (self, bus_subsys);
+    else
+        preload_contents_other (self);
+
+    if (!bus_subsys)
+        return;
+
+    mm_obj_dbg (self, "port contents loaded:");
+    mm_obj_dbg (self, "  bus: %s", bus_subsys ? bus_subsys : "n/a");
+    if (self->priv->interface)
+        mm_obj_dbg (self, "  interface: %s", g_udev_device_get_sysfs_path (self->priv->interface));
+    if (self->priv->physdev)
+        mm_obj_dbg (self, "  device: %s", g_udev_device_get_sysfs_path (self->priv->physdev));
+    if (self->priv->driver)
+        mm_obj_dbg (self, "  driver: %s", self->priv->driver);
+    if (self->priv->vendor)
+        mm_obj_dbg (self, "  vendor: %04x", self->priv->vendor);
+    if (self->priv->product)
+        mm_obj_dbg (self, "  product: %04x", self->priv->product);
+    if (self->priv->revision)
+        mm_obj_dbg (self, "  revision: %04x", self->priv->revision);
 }
 
 /*****************************************************************************/
@@ -358,8 +468,9 @@ kernel_device_get_name (MMKernelDevice *_self)
 }
 
 static const gchar *
-kernel_device_get_driver (MMKernelDevice *_self)
+kernel_device_get_driver (MMKernelDevice *self)
 {
+
     MMKernelDeviceUdev *self;
     const gchar *driver, *subsys, *name;
     GUdevDevice *parent = NULL;
@@ -413,18 +524,16 @@ kernel_device_get_sysfs_path (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-
-    if (!self->priv->device)
-        return NULL;
-
-    return g_udev_device_get_sysfs_path (MM_KERNEL_DEVICE_UDEV (self)->priv->device);
+    return (self->priv->device ?
+            g_udev_device_get_sysfs_path (self->priv->device) :
+            NULL);
 }
 
 static const gchar *
 kernel_device_get_physdev_uid (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
-    const gchar *uid = NULL;
+    const gchar        *uid = NULL;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
@@ -435,7 +544,7 @@ kernel_device_get_physdev_uid (MMKernelDevice *_self)
     }
 
     /* Try to load from properties set on the physical device */
-    if ((uid = mm_kernel_device_get_global_property (MM_KERNEL_DEVICE (self), ID_MM_PHYSDEV_UID)) != NULL)
+    if ((uid = mm_kernel_device_get_global_property (_self, ID_MM_PHYSDEV_UID)) != NULL)
         return uid;
 
     /* Use physical device sysfs path, if any */
@@ -448,33 +557,21 @@ kernel_device_get_physdev_uid (MMKernelDevice *_self)
 }
 
 static guint16
-kernel_device_get_physdev_vid (MMKernelDevice *_self)
+kernel_device_get_physdev_vid (MMKernelDevice *self)
 {
-    MMKernelDeviceUdev *self;
-
-    self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_device_ids (self);
-    return self->priv->vendor;
+    return MM_KERNEL_DEVICE_UDEV (self)->priv->vendor;
 }
 
 static guint16
-kernel_device_get_physdev_pid (MMKernelDevice *_self)
+kernel_device_get_physdev_pid (MMKernelDevice *self)
 {
-    MMKernelDeviceUdev *self;
-
-    self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_device_ids (self);
-    return self->priv->product;
+    return MM_KERNEL_DEVICE_UDEV (self)->priv->product;
 }
 
 static guint16
-kernel_device_get_physdev_revision (MMKernelDevice *_self)
+kernel_device_get_physdev_revision (MMKernelDevice *self)
 {
-    MMKernelDeviceUdev *self;
-
-    self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_device_ids (self);
-    return self->priv->revision;
+    return MM_KERNEL_DEVICE_UDEV (self)->priv->revision;
 }
 
 static const gchar *
@@ -483,11 +580,7 @@ kernel_device_get_physdev_sysfs_path (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_physdev (self);
-    if (!self->priv->physdev)
-        return NULL;
-
-    return g_udev_device_get_sysfs_path (self->priv->physdev);
+    return (self->priv->physdev ? g_udev_device_get_sysfs_path (self->priv->physdev) : NULL);
 }
 
 static const gchar *
@@ -496,11 +589,7 @@ kernel_device_get_physdev_subsystem (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_physdev (self);
-    if (!self->priv->physdev)
-        return NULL;
-
-    return g_udev_device_get_subsystem (self->priv->physdev);
+    return (self->priv->physdev ? g_udev_device_get_subsystem (self->priv->physdev) : NULL);
 }
 
 static const gchar *
@@ -509,11 +598,7 @@ kernel_device_get_physdev_manufacturer (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_physdev (self);
-    if (!self->priv->physdev)
-        return NULL;
-
-    return g_udev_device_get_sysfs_attr (self->priv->physdev, "manufacturer");
+    return (self->priv->physdev ? g_udev_device_get_sysfs_attr (self->priv->physdev, "manufacturer") : NULL);
 }
 
 static const gchar *
@@ -522,11 +607,7 @@ kernel_device_get_physdev_product (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_physdev (self);
-    if (!self->priv->physdev)
-        return NULL;
-
-    return g_udev_device_get_sysfs_attr (self->priv->physdev, "product");
+    return (self->priv->physdev ? g_udev_device_get_sysfs_attr (self->priv->physdev, "product") : NULL);
 }
 
 static gint
@@ -535,8 +616,7 @@ kernel_device_get_interface_class (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_interface (self);
-    return (self->priv->interface ? g_udev_device_get_sysfs_attr_as_int (self->priv->interface, "bInterfaceClass") : -1);
+    return (self->priv->interface ? (gint) udev_device_get_sysfs_attr_as_hex (self->priv->interface, "bInterfaceClass") : -1);
 }
 
 static gint
@@ -545,8 +625,7 @@ kernel_device_get_interface_subclass (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_interface (self);
-    return (self->priv->interface ? g_udev_device_get_sysfs_attr_as_int (self->priv->interface, "bInterfaceSubClass") : -1);
+    return (self->priv->interface ? (gint) udev_device_get_sysfs_attr_as_hex (self->priv->interface, "bInterfaceSubClass") : -1);
 }
 
 static gint
@@ -555,8 +634,7 @@ kernel_device_get_interface_protocol (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_interface (self);
-    return (self->priv->interface ? g_udev_device_get_sysfs_attr_as_int (self->priv->interface, "bInterfaceProtocol") : -1);
+    return (self->priv->interface ? (gint) udev_device_get_sysfs_attr_as_hex (self->priv->interface, "bInterfaceProtocol") : -1);
 }
 
 static const gchar *
@@ -565,7 +643,6 @@ kernel_device_get_interface_sysfs_path (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_interface (self);
     return (self->priv->interface ? g_udev_device_get_sysfs_path (self->priv->interface) : NULL);
 }
 
@@ -575,7 +652,6 @@ kernel_device_get_interface_description (MMKernelDevice *_self)
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-    ensure_interface (self);
     return (self->priv->interface ? g_udev_device_get_sysfs_attr (self->priv->interface, "interface") : NULL);
 }
 
@@ -614,11 +690,7 @@ kernel_device_has_property (MMKernelDevice *_self,
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-
-    if (!self->priv->device)
-        return FALSE;
-
-    return g_udev_device_has_property (self->priv->device, property);
+    return (self->priv->device ? g_udev_device_has_property (self->priv->device, property) : FALSE);
 }
 
 static const gchar *
@@ -628,11 +700,7 @@ kernel_device_get_property (MMKernelDevice *_self,
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-
-    if (!self->priv->device)
-        return NULL;
-
-    return g_udev_device_get_property (self->priv->device, property);
+    return (self->priv->device ? g_udev_device_get_property (self->priv->device, property) : NULL);
 }
 
 static gboolean
@@ -642,8 +710,6 @@ kernel_device_has_global_property (MMKernelDevice *_self,
     MMKernelDeviceUdev *self;
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
-
-    ensure_physdev (self);
     if (self->priv->physdev && g_udev_device_has_property (self->priv->physdev, property))
         return TRUE;
 
@@ -659,7 +725,6 @@ kernel_device_get_global_property (MMKernelDevice *_self,
 
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
-    ensure_physdev (self);
     if (self->priv->physdev &&
         g_udev_device_has_property (self->priv->physdev, property) &&
         (str = g_udev_device_get_property (self->priv->physdev, property)) != NULL)
@@ -667,7 +732,6 @@ kernel_device_get_global_property (MMKernelDevice *_self,
 
     return kernel_device_get_property (_self, property);
 }
-
 
 /*****************************************************************************/
 
@@ -770,8 +834,10 @@ initable_init (GInitable     *initable,
     const gchar        *name;
 
     /* When created from a GUdevDevice, we're done */
-    if (self->priv->device)
+    if (self->priv->device) {
+        preload_contents (self);
         return TRUE;
+    }
 
     /* Otherwise, we do need properties with subsystem and name */
     if (!self->priv->properties) {
@@ -815,6 +881,8 @@ initable_init (GInitable     *initable,
         g_object_unref (client);
     }
 
+    if (self->priv->device)
+        preload_contents (self);
     return TRUE;
 }
 
