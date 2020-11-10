@@ -467,8 +467,31 @@ connect_context_free (ConnectContext *ctx)
     g_free (ctx->user);
     g_free (ctx->password);
 
+
     if (ctx->data)
         mm_port_set_claimed ((MMPort *)ctx->data, FALSE);
+
+    if (ctx->client_ipv4) {
+        if (ctx->packet_service_status_ipv4_indication_id) {
+            common_setup_cleanup_packet_service_status_unsolicited_events (ctx->self,
+                                                                           ctx->client_ipv4,
+                                                                           FALSE,
+                                                                           &ctx->packet_service_status_ipv4_indication_id);
+        }
+        if (ctx->event_report_ipv4_indication_id) {
+            cleanup_event_report_unsolicited_events (ctx->self,
+                                                     ctx->client_ipv4,
+                                                     &ctx->event_report_ipv4_indication_id);
+        }
+        if (ctx->packet_data_handle_ipv4) {
+            g_autoptr(QmiMessageWdsStopNetworkInput) input = NULL;
+
+            input = qmi_message_wds_stop_network_input_new ();
+            qmi_message_wds_stop_network_input_set_packet_data_handle (input, ctx->packet_data_handle_ipv4, NULL);
+            qmi_client_wds_stop_network (ctx->client_ipv4, input, MM_BASE_BEARER_DEFAULT_DISCONNECTION_TIMEOUT, NULL, NULL, NULL);
+        }
+        g_clear_object (&ctx->client_ipv4);
+
     }
 
     if (ctx->client_ipv6) {
@@ -488,7 +511,7 @@ connect_context_free (ConnectContext *ctx)
 
             input = qmi_message_wds_stop_network_input_new ();
             qmi_message_wds_stop_network_input_set_packet_data_handle (input, ctx->packet_data_handle_ipv6, NULL);
-            qmi_client_wds_stop_network (ctx->client_ipv6, input, 30, NULL, NULL, NULL);
+            qmi_client_wds_stop_network (ctx->client_ipv6, input, MM_BASE_BEARER_DEFAULT_DISCONNECTION_TIMEOUT, NULL, NULL, NULL);
         }
         g_clear_object (&ctx->client_ipv6);
     }
@@ -1529,7 +1552,7 @@ connect_context_step (GTask *task)
         input = build_start_network_input (ctx);
         qmi_client_wds_start_network (ctx->client_ipv4,
                                       input,
-                                      45,
+                                      MM_BASE_BEARER_DEFAULT_CONNECTION_TIMEOUT,
                                       g_task_get_cancellable (task),
                                       (GAsyncReadyCallback)start_network_ready,
                                       task);
@@ -1645,7 +1668,7 @@ connect_context_step (GTask *task)
         input = build_start_network_input (ctx);
         qmi_client_wds_start_network (ctx->client_ipv6,
                                       input,
-                                      45,
+                                      MM_BASE_BEARER_DEFAULT_CONNECTION_TIMEOUT,
                                       g_task_get_cancellable (task),
                                       (GAsyncReadyCallback)start_network_ready,
                                       task);
@@ -2128,7 +2151,7 @@ disconnect_context_step (GTask *task)
             ctx->running_ipv6 = FALSE;
             qmi_client_wds_stop_network (ctx->client_ipv4,
                                          input,
-                                         30,
+                                         MM_BASE_BEARER_DEFAULT_DISCONNECTION_TIMEOUT,
                                          NULL,
                                          (GAsyncReadyCallback)stop_network_ready,
                                          task);
@@ -2159,7 +2182,7 @@ disconnect_context_step (GTask *task)
             ctx->running_ipv6 = TRUE;
             qmi_client_wds_stop_network (ctx->client_ipv6,
                                          input,
-                                         30,
+                                         MM_BASE_BEARER_DEFAULT_DISCONNECTION_TIMEOUT,
                                          NULL,
                                          (GAsyncReadyCallback)stop_network_ready,
                                          task);
