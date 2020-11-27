@@ -651,6 +651,8 @@ kernel_device_get_driver (MMKernelDevice *self)
     const gchar *driver, *subsys, *name;
     GUdevDevice *parent = NULL;
 
+    g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
+
     self = MM_KERNEL_DEVICE_UDEV (_self);
 
     if (!self->priv->device)
@@ -696,7 +698,6 @@ kernel_device_get_driver (MMKernelDevice *self)
 
     /* Note: may return NULL! */
     return self->priv->driver;
-
 }
 
 static const gchar *
