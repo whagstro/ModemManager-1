@@ -261,7 +261,6 @@ mm_shared_quectel_setup_sim_hot_swap (MMIfaceModem        *self,
     g_regex_unref (pattern);
     mm_obj_dbg (self, "RDY detection set up");
 
-
     /* Now, if available, setup parent logic */
     if (priv->iface_modem_parent->setup_sim_hot_swap &&
         priv->iface_modem_parent->setup_sim_hot_swap_finish) {
