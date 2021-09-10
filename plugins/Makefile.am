@@ -214,6 +214,12 @@ libmm_shared_sierra_la_LDFLAGS = $(SHARED_COMMON_LINKER_FLAGS)
 libmm_shared_sierra_la_LIBADD = \
 	$(builddir)/libhelpers-sierra.la \
 	$(NULL)
+if WITH_MBIM
+libmm_shared_sierra_la_SOURCES += \
+	sierra/mm-broadband-modem-mbim-sierra.h \
+	sierra/mm-broadband-modem-mbim-sierra.c \
+	$(NULL)
+endif
 
 SIERRA_COMMON_COMPILER_FLAGS = -I$(top_srcdir)/plugins/sierra
 

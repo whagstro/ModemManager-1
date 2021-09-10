@@ -31,7 +31,7 @@
 #endif
 
 #if defined WITH_MBIM
-#include "mm-broadband-modem-mbim.h"
+#include "mm-broadband-modem-mbim-sierra.h"
 #endif
 
 G_DEFINE_TYPE (MMPluginSierra, mm_plugin_sierra, MM_TYPE_PLUGIN)
@@ -64,7 +64,7 @@ create_modem (MMPlugin *self,
 #if defined WITH_MBIM
     if (mm_port_probe_list_has_mbim_port (probes)) {
         mm_obj_dbg (self, "MBIM-powered Sierra modem found...");
-        return MM_BASE_MODEM (mm_broadband_modem_mbim_new (uid,
+        return MM_BASE_MODEM (mm_broadband_modem_mbim_sierra_new (uid,
                                                            drivers,
                                                            mm_plugin_get_name (self),
                                                            vendor,
