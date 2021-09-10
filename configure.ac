@@ -496,6 +496,7 @@ MM_ENABLE_PLUGIN([telit],
 MM_ENABLE_PLUGIN([thuraya])
 MM_ENABLE_PLUGIN([tplink])
 MM_ENABLE_PLUGIN([ublox])
+MM_ENABLE_PLUGIN([unitac])
 MM_ENABLE_PLUGIN([via])
 MM_ENABLE_PLUGIN([wavecom])
 MM_ENABLE_PLUGIN([x22x])
@@ -626,6 +627,7 @@ echo "
       thuraya:                 ${enable_plugin_thuraya}
       tplink:                  ${enable_plugin_tplink}
       ublox:                   ${enable_plugin_ublox}
+      unitac:                  ${enable_plugin_unitac}
       via:                     ${enable_plugin_via}
       wavecom:                 ${enable_plugin_wavecom}
       x22x:                    ${enable_plugin_x22x}
