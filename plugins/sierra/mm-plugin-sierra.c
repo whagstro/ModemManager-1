@@ -32,10 +32,11 @@
 #endif
 
 #if defined WITH_MBIM
-#include "mm-broadband-modem-mbim-sierra.h"
 
 #include "mm-broadband-modem-mbim.h"
 #include "mm-broadband-modem-mbim-xmm.h"
+#include "mm-broadband-modem-mbim-sierra.h"
+
 #endif
 
 G_DEFINE_TYPE (MMPluginSierra, mm_plugin_sierra, MM_TYPE_PLUGIN)
